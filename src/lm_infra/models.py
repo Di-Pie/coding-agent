@@ -1,4 +1,4 @@
 
 class Model:
-    def generate():
+    def generate(self):
         pass
