@@ -1,0 +1,14 @@
+{
+  "model": {
+    "name": "qwen3.8",
+    "base_url": "http://127.0.0.1:11434",
+    "temperature": 0.2,
+    "context_length": 32768
+  },
+  "agent": {
+    "max_steps": 30,
+    "command_timeout": 120,
+    "max_output_chars": 12000
+  }
+}
+

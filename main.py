@@ -1,8 +1,7 @@
-
 max_steps = 99
 
-if __name__ == "__main__":
 
+def main():
     # for step in range(max_steps):
         # Construct prompt
         # input_prompt = (issue, feedback, ...)
@@ -20,3 +19,6 @@ if __name__ == "__main__":
 
     pass
 
+
+if __name__ == "__main__":
+    main()
