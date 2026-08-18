@@ -2,8 +2,6 @@
 
 A small research project inspired by [SWE-agent](https://arxiv.org/abs/2405.15793). The goal is to implement an Agent-Computer Interface (ACI) from scratch and study how interface design turns a lightweight local LLM into a coding agent.
 
-Target completion date: **September 1, 2026**.
-
 ## Goals
 
 The agent should be able to:
@@ -17,12 +15,29 @@ The agent should be able to:
 
 ## Main Experiment
 
-Run the same 7B or 14B code model locally on an RTX 4090 and compare:
+Run the same local model on an RTX 4090 and compare:
 
 1. **Shell baseline** — the model works through a general-purpose shell.
 2. **Structured ACI** — the model receives dedicated tools for inspecting, searching, editing, testing, and submitting code.
 
 Keeping the model and inference budget fixed will help isolate the effect of the interface.
+
+## Model
+
+The initial model is served locally through Ollama:
+
+| Property | Value |
+|---|---|
+| Ollama model | `qwen3.8` |
+| Architecture | Qwen 3.5 (`qwen35`) |
+| Parameters | 27.3B |
+| Quantization | Q4_K_M |
+| Maximum context length | 262,144 tokens |
+| Embedding length | 5,120 |
+| Capabilities | Completion, vision, tools, thinking |
+| Minimum Ollama version | 0.32.12 |
+
+The project may use a smaller configured context window than the model's maximum in order to control KV-cache memory use and inference latency.
 
 ## Planned Tools
 
@@ -36,16 +51,6 @@ git_diff()
 submit()
 ```
 
-## First Milestone
-
-Build one complete working loop:
-
-```text
-problem -> inspect -> edit -> test -> submit patch
-```
-
-Start with three small toy bugs before moving to real benchmark tasks.
-
 ## Evaluation
 
 For each run, record:
@@ -58,18 +63,6 @@ For each run, record:
 - final patch and full trajectory.
 
 The model, prompt, sampling settings, step limit, and token budget should remain fixed when comparing interfaces.
-
-## Roadmap
-
-- [ ] Define model, tool, and environment interfaces
-- [ ] Connect a local LLM
-- [ ] Implement the minimal agent loop
-- [ ] Add shell execution and patch submission
-- [ ] Add structured repository tools
-- [ ] Add safety limits and trajectory logging
-- [ ] Create reproducible benchmark tasks
-- [ ] Run baseline, ACI, and ablation experiments
-- [ ] Publish results and a short demo
 
 ## References
 
