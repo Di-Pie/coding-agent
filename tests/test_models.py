@@ -64,3 +64,14 @@ class OllamaModelTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "missing message.content"):
             self.model.generate([])
+
+    @patch("lm_infra.models.urllib.request.urlopen")
+    def test_missing_usage_is_unknown(self, urlopen: unittest.mock.Mock) -> None:
+        urlopen.return_value = FakeHTTPResponse(
+            b'{"message": {"role": "assistant", "content": "hello"}}'
+        )
+
+        result = self.model.generate([])
+
+        self.assertIsNone(result.prompt_tokens)
+        self.assertIsNone(result.completion_tokens)
