@@ -3,10 +3,12 @@
 from tools.editor import create, edit
 from tools.search import find_file, search_dir, search_file
 from tools.shell import bash
+from tools.specs import TOOL_SPECS
 from tools.task import submit
 from tools.viewer import goto, open_file, scroll_down, scroll_up
 
 __all__ = [
+    "TOOL_SPECS",
     "bash",
     "create",
     "edit",
