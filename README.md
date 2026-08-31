@@ -39,16 +39,45 @@ The initial model is served locally through Ollama:
 
 The project may use a smaller configured context window than the model's maximum in order to control KV-cache memory use and inference latency.
 
-## Planned Tools
+## Tool Contracts
 
 ```text
-list_files(path, depth)
-open_file(path, line_start, line_end)
-search(query, path)
-apply_patch(patch)
-run(command, timeout)
-git_diff()
+open(path, line_number)
+goto(line_number)
+scroll_down()
+scroll_up()
+search_file(search_term, file)
+search_dir(search_term, dir)
+find_file(file_name, dir)
+edit(start_line, end_line, replacement_text)
+create(filename)
+bash(command)
 submit()
+```
+
+These interfaces are defined, but their concrete implementations are still in
+progress.
+
+## Running Tests
+
+Run commands from the repository root. Because the project uses a `src/`
+layout and is not required to be installed during development, include `src`
+on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+Compile all source and test modules to catch syntax errors:
+
+```bash
+python -m compileall -q src tests
+```
+
+Check patches for whitespace errors before committing:
+
+```bash
+git diff --check
 ```
 
 ## Evaluation

@@ -6,30 +6,34 @@ Step 3 defines the boundary between model-generated text and future tool
 execution:
 
 ```text
-ModelResponse.text -> parse_action(text) -> Action -> future dispatcher
+ModelResponse.text -> parse_action(text) -> Action -> execute_tool() -> Observation
 ```
 
 The model must produce exactly one JSON action per response. `parse_action`
 parses the text, validates the tool name and arguments, and returns an `Action`.
-It does not execute the action.
+`execute_tool` maps that action to a tool implementation and returns its
+structured `Observation`.
 
 This step also defines the JSON-facing contracts for the ten specialized tools
 from the SWE-agent paper plus general Bash execution. The tool functions remain
-skeletons; dispatch, execution, observations, prompting, retry behavior, and
-the agent loop are not part of this step.
+skeletons; their behavior, persistent execution state, observation formatting,
+prompting, retry behavior, and the agent loop are not part of this step.
 
 ## File Layout
 
 ```text
-src/agent_protocol/data_models.py   Action data model
+src/agent_protocol/data_models.py   Action and Observation data models
 src/agent_protocol/parser.py        JSON parsing and action validation
 src/tools/specs.py                  Tool names and argument schemas
+src/tools/dispatcher.py             Action-to-tool mapping and dispatch
 src/tools/viewer.py                 File-viewer tool skeletons
 src/tools/search.py                 Search tool skeletons
 src/tools/editor.py                 Editing tool skeletons
 src/tools/shell.py                  Bash tool skeleton
 src/tools/task.py                   Submit tool skeleton
 tests/test_parser.py                Parser and validation tests
+tests/test_data_models.py           Observation invariant tests
+tests/test_dispatcher.py            Dispatch contract tests
 ```
 
 ## Core Types
@@ -44,6 +48,27 @@ class Action:
     tool: str
     arguments: dict[str, object]
 ```
+
+`Observation` is also defined in `src/agent_protocol/data_models.py`:
+
+```python
+@dataclass(frozen=True)
+class Observation:
+    """Structured result of executing one action."""
+
+    output: str
+    success: bool
+    truncated: bool
+    terminal: bool
+    exit_code: int | None = None
+    error: str | None = None
+```
+
+The model eventually receives `output` as text, while the runtime can inspect
+structured status and metadata without parsing that text. `__post_init__`
+rejects inconsistent observations: success cannot include an error, failure
+must include one, terminal results must succeed, and a provided process exit
+code must agree with `success`.
 
 The JSON-facing schema types are defined in `src/tools/specs.py`:
 
@@ -120,6 +145,24 @@ Python otherwise treats `bool` as a subclass of `int`.
 Error messages are concise enough to be returned to the model later. The
 parser only reports the error; whether the future agent retries, terminates, or
 adds the error to history remains an agent-policy decision.
+
+## Dispatch
+
+`TOOL_MAP` in `src/tools/dispatcher.py` maps all 11 JSON tool names to their
+Python functions. `execute_tool(action)` forwards the validated arguments and
+returns the tool's `Observation` unchanged:
+
+```text
+Action(tool="open", arguments={...})
+    -> TOOL_MAP["open"](**arguments)
+    -> Observation(...)
+```
+
+The dispatcher assumes the action was already validated. Expected operational
+failures should become `Observation(success=False, ...)` inside tool
+implementations; unexpected programming exceptions propagate during v0.1
+development. A test ensures `set(TOOL_SPECS) == set(TOOL_MAP)` so the parser
+and dispatcher cannot silently support different tool sets.
 
 ## Tool Set
 
