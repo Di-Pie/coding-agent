@@ -2,7 +2,9 @@
 
 from agent_protocol import Observation
 
+from .context import ToolContext
 
-def bash(command: str) -> Observation:
+
+def bash(context: ToolContext, command: str) -> Observation:
     """Execute a command through Bash."""
     raise NotImplementedError

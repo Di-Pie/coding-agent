@@ -6,24 +6,27 @@ Step 3 defines the boundary between model-generated text and future tool
 execution:
 
 ```text
-ModelResponse.text -> parse_action(text) -> Action -> execute_tool() -> Observation
+ModelResponse.text -> parse_action(text) -> Action + ToolContext
+                                             -> execute_tool() -> Observation
 ```
 
 The model must produce exactly one JSON action per response. `parse_action`
 parses the text, validates the tool name and arguments, and returns an `Action`.
-`execute_tool` maps that action to a tool implementation and returns its
-structured `Observation`.
+`execute_tool` maps that action to a tool implementation, injects shared
+execution context, and returns its structured `Observation`.
 
 This step also defines the JSON-facing contracts for the ten specialized tools
-from the SWE-agent paper plus general Bash execution. The tool functions remain
-skeletons; their behavior, persistent execution state, observation formatting,
-prompting, retry behavior, and the agent loop are not part of this step.
+from the SWE-agent paper plus general Bash execution. `ToolContext` defines the
+state shared across actions. The tool functions remain skeletons; their actual
+behavior, runtime state transitions, observation formatting, prompting, retry
+behavior, and the agent loop are not part of this step.
 
 ## File Layout
 
 ```text
 src/agent_protocol/data_models.py   Action and Observation data models
 src/agent_protocol/parser.py        JSON parsing and action validation
+src/tools/context.py                Shared tool state and execution limits
 src/tools/specs.py                  Tool names and argument schemas
 src/tools/dispatcher.py             Action-to-tool mapping and dispatch
 src/tools/viewer.py                 File-viewer tool skeletons
@@ -33,6 +36,7 @@ src/tools/shell.py                  Bash tool skeleton
 src/tools/task.py                   Submit tool skeleton
 tests/test_parser.py                Parser and validation tests
 tests/test_data_models.py           Observation invariant tests
+tests/test_context.py               Context initialization and boundary tests
 tests/test_dispatcher.py            Dispatch contract tests
 ```
 
@@ -69,6 +73,31 @@ structured status and metadata without parsing that text. `__post_init__`
 rejects inconsistent observations: success cannot include an error, failure
 must include one, terminal results must succeed, and a provided process exit
 code must agree with `success`.
+
+`ToolContext` is defined in `src/tools/context.py`:
+
+```python
+@dataclass
+class ToolContext:
+    repository_root: Path
+    working_directory: Path
+    open_file: Path | None = None
+    window_start: int = 1
+    window_size: int = 100
+    command_timeout: int = 120
+    max_output_chars: int = 12_000
+```
+
+One context belongs to one agent run. It is mutable because `open`, scrolling,
+editing, creation, and standalone `cd` may update persistent execution state.
+Keeping state in an explicit per-run object avoids module globals and allows
+separate agents and tests to use isolated contexts.
+
+`ToolContext.__post_init__` resolves paths, rejects missing or invalid initial
+paths, prevents the working directory and initial open file from resolving
+outside the repository, and validates positive limits. These checks validate
+initial state only. Tools must still validate every model-provided path before
+using it or changing context state.
 
 The JSON-facing schema types are defined in `src/tools/specs.py`:
 
@@ -149,14 +178,18 @@ adds the error to history remains an agent-policy decision.
 ## Dispatch
 
 `TOOL_MAP` in `src/tools/dispatcher.py` maps all 11 JSON tool names to their
-Python functions. `execute_tool(action)` forwards the validated arguments and
-returns the tool's `Observation` unchanged:
+Python functions. `execute_tool(action, context)` injects the context, forwards
+the validated model arguments, and returns the tool's `Observation` unchanged:
 
 ```text
-Action(tool="open", arguments={...})
-    -> TOOL_MAP["open"](**arguments)
+Action(tool="open", arguments={...}) + ToolContext(...)
+    -> TOOL_MAP["open"](context, **arguments)
     -> Observation(...)
 ```
+
+`ToolContext` is a Python-only dependency and does not appear in the JSON tool
+schemas. All tool functions accept it as their first argument to keep dispatch
+uniform, even when a particular tool does not currently use every field.
 
 The dispatcher assumes the action was already validated. Expected operational
 failures should become `Observation(success=False, ...)` inside tool
