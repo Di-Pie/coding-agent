@@ -6,6 +6,10 @@ from pathlib import Path
 DEFAULT_WINDOW_SIZE = 100
 
 
+class ToolPathError(ValueError):
+    """Raised when a tool path is invalid or unsafe."""
+
+
 @dataclass
 class ToolContext:
     """Mutable repository state and execution limits shared by tools."""
@@ -22,9 +26,9 @@ class ToolContext:
         """Normalize paths and reject an invalid initial execution state."""
         repository_root = self.repository_root.resolve()
         if not repository_root.exists():
-            raise ValueError("Repository root does not exist.")
+            raise ToolPathError("Repository root does not exist.")
         if not repository_root.is_dir():
-            raise ValueError("Repository root is not a directory.")
+            raise ToolPathError("Repository root is not a directory.")
 
         working_directory = self.working_directory
         if not working_directory.is_absolute():
@@ -32,27 +36,22 @@ class ToolContext:
         working_directory = working_directory.resolve()
 
         if not working_directory.exists():
-            raise ValueError("Working directory does not exist.")
+            raise ToolPathError("Working directory does not exist.")
         if not working_directory.is_dir():
-            raise ValueError("Working directory is not a directory.")
+            raise ToolPathError("Working directory is not a directory.")
         if not working_directory.is_relative_to(repository_root):
-            raise ValueError("Working directory must be inside the repository.")
+            raise ToolPathError("Working directory must be inside the repository.")
 
         self.repository_root = repository_root
         self.working_directory = working_directory
 
         if self.open_file is not None:
-            open_file = self.open_file
-            if not open_file.is_absolute():
-                open_file = working_directory / open_file
-            open_file = open_file.resolve()
+            open_file = self.resolve_path(self.open_file)
 
             if not open_file.exists():
-                raise ValueError("Open file does not exist.")
+                raise ToolPathError("Open file does not exist.")
             if not open_file.is_file():
-                raise ValueError("Open file must be a regular file.")
-            if not open_file.is_relative_to(repository_root):
-                raise ValueError("Open file must be inside the repository.")
+                raise ToolPathError("Open file must be a regular file.")
 
             self.open_file = open_file
 
@@ -64,3 +63,18 @@ class ToolContext:
             raise ValueError("command_timeout must be positive.")
         if self.max_output_chars <= 0:
             raise ValueError("max_output_chars must be positive.")
+
+    def resolve_path(self, path: str | Path) -> Path:
+        """Resolve a path relative to the working directory and enforce containment."""
+
+        candidate_path = Path(path)
+
+        if not candidate_path.is_absolute():
+            candidate_path = self.working_directory / candidate_path
+
+        resolved_path = candidate_path.resolve()
+
+        if not resolved_path.is_relative_to(self.repository_root):
+            raise ToolPathError(f"Path must be inside the repository: {path}")
+
+        return resolved_path
