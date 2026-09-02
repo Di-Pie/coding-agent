@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools import ToolContext, open_file
+from tools import ToolContext, goto, open_file, scroll_down, scroll_up
 
 
 class OpenFileTests(unittest.TestCase):
@@ -133,6 +133,122 @@ class OpenFileTests(unittest.TestCase):
 
             self.assertFalse(observation.success)
             self.assertIn("open:", observation.error or "")
+
+    def test_truncates_rendered_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_numbered_file(root, 20)
+            context = ToolContext(root, root, max_output_chars=40)
+
+            observation = open_file(context, "example.py")
+
+            self.assertTrue(observation.success)
+            self.assertTrue(observation.truncated)
+            self.assertEqual(len(observation.output), 40)
+            self.assertEqual(context.window_start, 1)
+
+    def test_goto_renders_target_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_numbered_file(root, 250)
+            context = self.make_context(root)
+            open_file(context, "example.py")
+
+            observation = goto(context, 50)
+
+            self.assertTrue(observation.success)
+            self.assertEqual(context.window_start, 33)
+            self.assertIn("(32 more lines above)", observation.output)
+            self.assertIn(" 50:content 50", observation.output)
+            self.assertIn("132:content 132", observation.output)
+
+    def test_goto_rejects_invalid_line_without_changing_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_numbered_file(root, 250)
+            context = self.make_context(root)
+            open_file(context, "example.py", line_number=50)
+
+            observation = goto(context, 0)
+
+            self.assertFalse(observation.success)
+            self.assertIn("goto: line_number must be between", observation.error or "")
+            self.assertEqual(context.window_start, 33)
+
+    def test_scroll_down_and_up_preserve_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_numbered_file(root, 250)
+            context = self.make_context(root)
+            open_file(context, "example.py")
+
+            down = scroll_down(context)
+
+            self.assertTrue(down.success)
+            self.assertEqual(context.window_start, 99)
+            self.assertIn(" 99:content 99", down.output)
+            self.assertIn("198:content 198", down.output)
+
+            up = scroll_up(context)
+
+            self.assertTrue(up.success)
+            self.assertEqual(context.window_start, 1)
+            self.assertIn("  1:content 1", up.output)
+            self.assertIn("100:content 100", up.output)
+
+    def test_scrolling_clamps_at_file_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_numbered_file(root, 250)
+            context = self.make_context(root)
+            open_file(context, "example.py")
+
+            scroll_up(context)
+            self.assertEqual(context.window_start, 1)
+
+            scroll_down(context)
+            scroll_down(context)
+            scroll_down(context)
+            self.assertEqual(context.window_start, 151)
+
+            final_window = scroll_down(context)
+            self.assertEqual(context.window_start, 151)
+            self.assertIn("250:content 250", final_window.output)
+            self.assertNotIn("more lines below", final_window.output)
+
+    def test_navigation_requires_an_open_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = self.make_context(root)
+
+            results = [goto(context, 1), scroll_down(context), scroll_up(context)]
+
+            for observation, tool_name in zip(
+                results,
+                ("goto", "scroll_down", "scroll_up"),
+                strict=True,
+            ):
+                with self.subTest(tool=tool_name):
+                    self.assertFalse(observation.success)
+                    self.assertEqual(
+                        observation.error,
+                        f"{tool_name}: no file is currently open",
+                    )
+
+    def test_navigation_rereads_file_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.write_numbered_file(root, 150)
+            context = self.make_context(root)
+            open_file(context, path.name)
+            path.write_text("updated\ncontent", encoding="utf-8")
+
+            observation = scroll_down(context)
+
+            self.assertTrue(observation.success)
+            self.assertEqual(context.window_start, 1)
+            self.assertIn("1:updated", observation.output)
+            self.assertIn("2:content", observation.output)
 
 
 if __name__ == "__main__":

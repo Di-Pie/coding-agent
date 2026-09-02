@@ -163,6 +163,25 @@ class ToolContextTests(unittest.TestCase):
                             **{field: value},
                         )
 
+    def test_validates_window_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository_root = Path(directory)
+
+            with self.assertRaisesRegex(ValueError, "must be nonnegative"):
+                ToolContext(
+                    repository_root,
+                    repository_root,
+                    window_overlap=-1,
+                )
+
+            with self.assertRaisesRegex(ValueError, "smaller than window_size"):
+                ToolContext(
+                    repository_root,
+                    repository_root,
+                    window_size=10,
+                    window_overlap=10,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

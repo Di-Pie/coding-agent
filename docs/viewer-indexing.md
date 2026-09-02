@@ -1,225 +1,260 @@
 # Viewer Indexing
 
-## A Systematic Indexing Method
-
-The key rule is:
+## Core Rule
 
 > Pick one coordinate system for calculations. Convert only at input and
 > output boundaries.
 
-For Python, use zero-based, half-open intervals internally because that is
-exactly how lists and slices work.
-
-## 1. Name the Two Coordinate Systems
-
-Human-facing line numbers:
+The viewer accepts human-facing, 1-based line numbers, but performs all
+internal calculations with Python's zero-based, half-open intervals:
 
 ```text
-1, 2, 3, 4, 5
+[start_index, stop_index)
 ```
 
-Python indices:
+`start_index` is included; `stop_index` is excluded. This matches Python list
+slicing exactly:
+
+```python
+visible_lines = lines[start_index:stop_index]
+```
+
+## Coordinate Systems
 
 ```text
-0, 1, 2, 3, 4
+Human line:    1  2  3  4  5
+Python index:  0  1  2  3  4
 ```
 
-Their relationship is always:
+Convert between them only at the system boundary:
 
 ```python
 index = line_number - 1
 line_number = index + 1
 ```
 
-Use variable names that expose the coordinate system:
+Use names that make the coordinate system explicit:
 
 ```python
-target_line_number  # 1-based
-target_index        # 0-based
-start_index         # 0-based, included
-stop_index          # 0-based, excluded
+target_line_number  # 1-based, external
+target_index        # 0-based, internal
+start_index         # 0-based and included
+stop_index          # 0-based and excluded
 ```
 
-Avoid ambiguous names such as `end_index`: does "end" mean included or
-excluded?
+Avoid `end_index`, because it does not reveal whether the end is included or
+excluded.
 
-## 2. Understand One Concrete Slice
+## Understanding One Slice
 
-Suppose a real file has ten lines:
+Suppose a ten-line file must display human lines 4 through 7:
 
 ```text
 Human line:    1  2  3  4  5  6  7  8  9 10
 Python index:  0  1  2  3  4  5  6  7  8  9
 ```
 
-We want human lines 4-7.
-
-Convert line 4 to its index:
+The first displayed line has index:
 
 ```python
 start_index = 4 - 1  # 3
 ```
 
-Line 7 has index 6, but Python's slice stop must point one position after the
-last wanted element:
+Human line 7 has index 6, but the slice must stop one position after the last
+included index:
 
 ```python
-stop_index = 7
+stop_index = 6 + 1  # 7
 ```
 
-Therefore:
+Therefore, `lines[3:7]` selects indices `3, 4, 5, 6`, corresponding to human
+lines `4, 5, 6, 7`. The number of selected elements is always:
 
 ```python
-lines[3:7]
+visible_count = stop_index - start_index
 ```
 
-selects indices:
+## SWE-agent Target Placement
 
-```text
-3, 4, 5, 6
-```
-
-which correspond to human lines:
-
-```text
-4, 5, 6, 7
-```
-
-The number selected is always:
+Following the SWE-agent implementation, the desired number of displayed lines
+before the requested line is:
 
 ```python
-stop_index - start_index  # 7 - 3 = 4
+lines_before_target = ceil(window_size / 6)
 ```
 
-## 3. Apply It to the Viewer
+For a positive integer window size, ceiling division can be written without
+floating-point arithmetic:
+
+```python
+lines_before_target = (window_size + 5) // 6
+```
+
+For `window_size = 100`, this produces 17. Therefore, when neither file
+boundary affects the window, 17 lines precede the target and the target is the
+18th displayed line. The offset means "lines before the target," not "the
+target's 1-based display position."
+
+This location is an ACI design choice rather than a mathematical necessity. We
+use it to reproduce SWE-agent's behavior.
+
+## Calculating and Clamping a Window
+
+First convert the requested line and calculate the desired start:
+
+```python
+target_index = line_number - 1
+lines_before_target = (window_size + 5) // 6
+desired_start = target_index - lines_before_target
+```
+
+The window cannot start before index 0. Its last possible full-window start is
+`total_lines - window_size`. If the file is shorter than the window, that
+value is negative, so clamp it to zero:
+
+```python
+max_start = max(0, total_lines - window_size)
+start_index = min(max(desired_start, 0), max_start)
+```
+
+Finally, calculate the exclusive stop without passing the end of the file:
+
+```python
+stop_index = min(start_index + window_size, total_lines)
+visible_lines = lines[start_index:stop_index]
+```
+
+The full calculation is:
+
+```python
+target_index = line_number - 1
+lines_before_target = (window_size + 5) // 6
+
+desired_start = target_index - lines_before_target
+max_start = max(0, total_lines - window_size)
+
+start_index = min(max(desired_start, 0), max_start)
+stop_index = min(start_index + window_size, total_lines)
+
+visible_lines = lines[start_index:stop_index]
+```
+
+### Concrete Viewer Example
 
 Assume:
 
 ```text
-total lines N = 12
-window size W = 4
-requested line = 8
-offset = 1
+total_lines = 250
+window_size = 100
+line_number = 50
 ```
 
-Convert the requested line immediately:
+Then:
 
 ```python
-target_index = 8 - 1  # 7
+target_index = 50 - 1                         # 49
+lines_before_target = (100 + 5) // 6          # 17
+desired_start = 49 - 17                       # 32
+max_start = max(0, 250 - 100)                 # 150
+start_index = min(max(32, 0), 150)            # 32
+stop_index = min(32 + 100, 250)               # 132
 ```
 
-Calculate where we want the window to start:
+The slice `lines[32:132]` contains indices 32 through 131, which correspond to
+human lines 33 through 132. Human line 50 is the 18th displayed line.
 
-```python
-desired_start = target_index - offset  # 6
-```
+Near the beginning or end of the file, clamping changes the target's displayed
+position. A target near the beginning cannot have 17 real lines before it, and
+the final file line appears at the bottom of the last complete window.
 
-The last possible start of a four-line window is:
+## Lines Above and Below
 
-```python
-max_start = N - W  # 12 - 4 = 8
-```
-
-Clamp the desired start:
-
-```python
-start_index = min(max(desired_start, 0), max_start)
-# min(max(6, 0), 8) = 6
-```
-
-Calculate the exclusive stop:
-
-```python
-stop_index = min(start_index + W, N)
-# min(6 + 4, 12) = 10
-```
-
-The slice is:
-
-```python
-lines[6:10]
-```
-
-That selects indices 6-9, corresponding to human lines 7-10:
+Think of the complete file as three adjacent half-open intervals:
 
 ```text
-7: ...
-8: ...  <- requested line
-9: ...
-10: ...
+0                                  total_lines
+|-------------------------------------------|
+|      above     |    visible    |   below  |
+|----------------|---------------|----------|
+0          start_index      stop_index      N
+
+above   = [0, start_index)
+visible = [start_index, stop_index)
+below   = [stop_index, total_lines)
 ```
 
-The surrounding counts follow directly:
+Their lengths follow directly from interval subtraction:
 
 ```python
-lines_above = start_index          # 6
-lines_below = N - stop_index       # 2
+lines_above = start_index
+visible_count = stop_index - start_index
+lines_below = total_lines - stop_index
 ```
 
-Check the accounting:
+`start_index` is included in the visible window. It also equals the number of
+elements before the window because the preceding indices are
+`0 .. start_index - 1`.
 
-```text
-6 above + 4 visible + 2 below = 12 total
-```
+`stop_index` is not included in the visible window. It is the first index in
+the region below the window, so `total_lines - stop_index` is the number of
+remaining lines.
 
-## 4. Use Invariants Instead of Intuition
+A potentially confusing numerical coincidence is that `stop_index` equals the
+1-based line number of the last displayed line. For example, human line 10 has
+index 9 and a slice that includes it stops at index 10. Index 10 itself is not
+displayed.
 
-After calculating a window, these must always be true:
+## Correctness Invariants
+
+Do not rely only on mental simulation. Check properties that must always hold:
 
 ```python
 assert 0 <= start_index <= stop_index <= total_lines
-assert stop_index - start_index <= window_size
-assert lines_above + len(lines_content) + lines_below == total_lines
+assert len(visible_lines) == stop_index - start_index
+assert lines_above == start_index
+assert lines_below == total_lines - stop_index
+assert lines_above + len(visible_lines) + lines_below == total_lines
 ```
 
-If the file is at least as large as the window:
+When the file is at least as large as the window:
 
 ```python
 if total_lines >= window_size:
-    assert len(lines_content) == window_size
+    assert len(visible_lines) == window_size
 ```
 
-If a target line was supplied:
+When a valid target was supplied:
 
 ```python
-target_index = line_number - 1
 assert start_index <= target_index < stop_index
 ```
 
-These assertions catch the exact mistakes encountered while implementing the
-viewer.
+Test at least these cases:
 
-## If the Current 1-Based Implementation Is Retained
+- An empty file.
+- A file shorter than the window.
+- A file exactly as long as the window.
+- A file longer than the window.
+- A target at the first line.
+- A target in the middle.
+- A target at the last line.
+- Invalid targets before and after the valid range.
 
-The current conversion is correct:
+## Repeatable Problem-Solving Process
 
-```python
-start_index = start_line - 1
-end_index = end_line
-lines[start_index:end_index]
-```
+When facing similar indexing problems:
 
-Why is there no `-1` for `end_line`?
+1. Write down the external coordinate system.
+2. Convert external values to zero-based indices immediately.
+3. Represent ranges as `[start, stop)`.
+4. Calculate the desired range without considering boundaries.
+5. Clamp the range to valid boundaries as a separate step.
+6. Derive counts from interval lengths instead of converting back to line
+   numbers.
+7. Convert indices back to human-facing numbers only for display.
+8. Verify the result with a small numbered example and invariants.
 
-`end_line` is a 1-based inclusive line number, while Python needs a 0-based
-exclusive stop:
-
-```text
-inclusive line 7
--> zero-based index 6
--> exclusive stop 7
-```
-
-The two conversions cancel:
-
-```text
-stop_index = (end_line - 1) + 1
-           = end_line
-```
-
-This is correct, but it is cognitively difficult. Using zero-based
-`start_index` and `stop_index` throughout makes the reasoning easier.
-
-Using a real file or numbered example is the right debugging method. Draw the
-two rows, calculate one slice manually, and then enforce the general properties
-with tests. Do not rely on mentally juggling `+1` and `-1`.
+Using a concrete example is not a workaround; it is the correct debugging
+technique. The goal is not to mentally remember every `+1` and `-1`. The goal
+is to use one internal representation so those conversions occur only at
+explicit boundaries.

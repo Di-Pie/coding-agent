@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_WINDOW_SIZE = 100
+DEFAULT_OVERLAP_LINES = 2
 
 
 class ToolPathError(ValueError):
@@ -19,6 +20,7 @@ class ToolContext:
     open_file: Path | None = None
     window_start: int = 1
     window_size: int = DEFAULT_WINDOW_SIZE
+    window_overlap: int = DEFAULT_OVERLAP_LINES
     command_timeout: int = 120
     max_output_chars: int = 12_000
 
@@ -63,6 +65,10 @@ class ToolContext:
             raise ValueError("command_timeout must be positive.")
         if self.max_output_chars <= 0:
             raise ValueError("max_output_chars must be positive.")
+        if self.window_overlap < 0:
+            raise ValueError("window_overlap must be nonnegative.")
+        if self.window_overlap >= self.window_size:
+            raise ValueError("window_overlap must be smaller than window_size.")
 
     def resolve_path(self, path: str | Path) -> Path:
         """Resolve a path relative to the working directory and enforce containment."""
