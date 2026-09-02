@@ -203,9 +203,19 @@ The specialized tools are `open`, `goto`, `scroll_down`, `scroll_up`,
 `search_file`, `search_dir`, `find_file`, `edit`, `create`, and `submit`.
 `bash` provides general shell-command execution.
 
-The file viewer has a 100-line maximum window, following the SWE-agent paper.
-Our action syntax intentionally differs from the paper: all actions, including
-Bash, use the common JSON envelope.
+The file viewer uses a 100-line window by default, following SWE-agent. For
+`goto(line_number)`, the requested line is neither the first line nor the
+center of the window. It appears approximately one-sixth of the way down:
+
+```text
+window_start = line_number - window_size / 6
+```
+
+The start is clamped at the beginning and end of the file. For example, with a
+100-line window, `goto(50)` starts at line 33, so line 50 appears as the 18th
+displayed line. The context stores `window_start`; `line_number` is only
+used to calculate it. Our action syntax intentionally differs from the paper:
+all actions, including Bash, use the common JSON envelope.
 
 The schemas are explicit rather than derived through function introspection.
 This makes the model-facing ACI contract easy to inspect and produces precise
